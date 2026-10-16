@@ -1,0 +1,17 @@
+(() => {
+ if(location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'||location.port!=='5174'){location.replace('http://localhost:5174/acceso-admin.html');return;}
+ const embedded=new URLSearchParams(location.search).get('embed')==='1';const $=id=>document.getElementById(id);let token=sessionStorage.getItem('impulso-owner-session')||'';
+ if(embedded){document.querySelector('main>h1').textContent='Controles del propietario';document.querySelector('main>a').hidden=true;document.querySelector('main>p').hidden=true;document.querySelector('#owner-controls a[href="administrador.html"]').hidden=true;}
+ async function api(route,data){const r=await fetch('/api/portal'+route,{method:data?'POST':'GET',headers:{Authorization:'Bearer '+token,...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{})});let result;try{result=await r.json();}catch{throw Error('No se pudo conectar con el panel local del propietario.');}if(!r.ok)throw Error(result.error||'Operación rechazada.');return result;}
+ async function status(){const data=await api('/owner/status');if(!embedded){location.href='administrador.html';return;}$('owner-login-panel').hidden=true;$('owner-controls').hidden=false;$('owner-reset').email.value=data.email;$('owner-reset').alternate.value=data.alternate;$('owner-password').email.value=data.ownerEmail;$('owner-session-count').textContent=data.sessions.length+' sesiones activas en total.';$('owner-events').replaceChildren();for(const event of data.events){const li=document.createElement('li');li.textContent=new Date(event.created).toLocaleString('es-EC')+' · '+event.event;$('owner-events').append(li);}}
+ const report=e=>$('owner-status').textContent=e.message||e;
+ async function action(button,fn){button.disabled=true;try{await fn();}catch(e){report(e);}finally{button.disabled=false;}}
+ $('owner-login').onsubmit=e=>{e.preventDefault();action(e.submitter,async()=>{const result=await api('/owner/login',Object.fromEntries(new FormData(e.target)));token=result.token;sessionStorage.setItem('impulso-owner-session',token);sessionStorage.setItem('impulso-admin-session',token);e.target.password.value='';await status();report('Ingresaste como propietario.');});};
+ $('owner-revoke').onclick=e=>action(e.target,async()=>{const r=await api('/owner/revoke-sessions',{password:$('owner-proof').value});report(r.message);await status();});
+ $('owner-reset').onsubmit=e=>{e.preventDefault();action(e.submitter,async()=>{const result=await api('/owner/reset-user',{...Object.fromEntries(new FormData(e.target)),ownerPassword:$('owner-proof').value});report(result.message+(result.notificationSent?' Aviso enviado por correo.':' No se envió aviso: revisa SMTP y el correo.'));e.target.newPassword.value='';await status();});};
+ $('owner-mail-reset').onclick=e=>action(e.target,async()=>report((await api('/owner/send-reset-link',{password:$('owner-proof').value,channel:$('owner-channel').value})).message));
+ $('owner-password').onsubmit=e=>{e.preventDefault();action(e.submitter,async()=>{const result=await api('/owner/request-password-change',Object.fromEntries(new FormData(e.target)));report(result.message);e.target.currentPassword.value='';});};
+ $('owner-logout').onclick=async()=>{try{await api('/auth/logout',{});}catch{}sessionStorage.removeItem('impulso-owner-session');sessionStorage.removeItem('impulso-admin-session');location.reload();};
+ if(token)status().catch(()=>{token='';sessionStorage.removeItem('impulso-owner-session');});
+})();
+

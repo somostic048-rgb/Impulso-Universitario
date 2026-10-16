@@ -1,0 +1,15 @@
+(() => {
+ const cfg=window.IMPULSO_CONFIG||{},storageKey='impulso-supabase-session';
+ const configured=!!(cfg.supabaseUrl&&cfg.supabaseAnonKey);
+ function read(){try{return JSON.parse(sessionStorage.getItem(storageKey)||'null')}catch{return null}}
+ function clear(){sessionStorage.removeItem(storageKey)}
+ function save(session){const s={access_token:session.access_token,refresh_token:session.refresh_token,expires_at:session.expires_at||Math.floor(Date.now()/1000)+(session.expires_in||3600)};sessionStorage.setItem(storageKey,JSON.stringify(s));return s}
+ async function request(route,{method='GET',body,access}={}){if(!configured)throw Error('Falta configurar Supabase.');let response;try{response=await fetch(cfg.supabaseUrl.replace(/\/$/,'')+route,{method,cache:'no-store',headers:{apikey:cfg.supabaseAnonKey,...(access?{Authorization:'Bearer '+access}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})})}catch{throw Error('No se pudo conectar. Revisa tu conexión e inténtalo de nuevo.')}const text=await response.text();let data={};try{data=text?JSON.parse(text):{}}catch{}if(!response.ok){const error=new Error(response.status===429?'Demasiados intentos. Espera unos minutos antes de volver a intentar.':data.msg||data.error_description||data.message||'No se pudo completar la operación.');error.status=response.status;throw error}return data}
+ async function requireEditor(session){await request('/auth/v1/user',{access:session.access_token});const allowed=await request('/rest/v1/rpc/is_editor',{method:'POST',body:{},access:session.access_token});if(allowed!==true){clear();throw Error('Tu cuenta no tiene permiso de editor. Contacta al propietario.')}return session}
+ let restoring;
+ async function restore(){if(restoring)return restoring;restoring=(async()=>{let s=read();if(!s?.access_token)return null;try{if(!s.expires_at||s.expires_at<=Math.floor(Date.now()/1000)+60){if(!s.refresh_token){clear();return null}s=save(await request('/auth/v1/token?grant_type=refresh_token',{method:'POST',body:{refresh_token:s.refresh_token}}))}return await requireEditor(s)}catch(e){if(e.status===400||e.status===401||e.status===403)clear();throw e}})();try{return await restoring}finally{restoring=null}}
+ async function signIn(email,password){const s=await request('/auth/v1/token?grant_type=password',{method:'POST',body:{email,password}});try{await requireEditor(s);return save(s)}catch(e){try{await request('/auth/v1/logout',{method:'POST',access:s.access_token})}catch{}throw e}}
+ async function signOut(){const s=read();clear();if(s?.access_token)try{await request('/auth/v1/logout',{method:'POST',access:s.access_token})}catch{}}
+ async function recover(email){const redirect=new URL('login.html',location.href).href;await request('/auth/v1/recover?redirect_to='+encodeURIComponent(redirect),{method:'POST',body:{email}})}
+ window.impulsoAuth={configured,read,save,clear,restore,signIn,signOut,recover,request,requireEditor};
+})();

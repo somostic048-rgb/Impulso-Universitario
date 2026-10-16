@@ -1,0 +1,8 @@
+(() => {
+ const auth=window.impulsoAuth;
+ async function resume(){const s=await auth.restore();if(!s){auth.clear();location.replace('login.html');return false}token=s.access_token;document.getElementById('login-panel').hidden=true;document.getElementById('editor').hidden=false;document.getElementById('content-panel').hidden=false;document.getElementById('logout').hidden=false;document.getElementById('mode').textContent='Sesión editorial verificada. Tus cambios se guardan en Supabase.';return true}
+ window.impulsoAdminReady=(async()=>{if(!remote){document.documentElement.classList.remove('admin-pending');return}try{if(!await resume())return;await window.impulsoContentReady;await refresh();document.documentElement.classList.remove('admin-pending')}catch{location.replace('login.html')}})();
+ const exit=document.getElementById('logout');exit.onclick=async()=>{await auth.signOut();token='';location.replace('login.html')};
+ if(remote){const nav=document.querySelector('.scheme-account-nav');if(nav){nav.innerHTML='<a class="scheme-change-password" href="login.html?mode=change">Cambiar mi contraseña</a><a href="index.html">Volver al sitio</a><button type="button" id="cloud-logout">Cerrar sesión</button>';nav.querySelector('button').onclick=()=>exit.click()}document.querySelector('.scheme-recovery-status')?.remove()}
+ if(remote){const timer=setInterval(async()=>{try{if(!await resume())clearInterval(timer)}catch{token='';document.documentElement.classList.add('admin-pending');location.replace('login.html')}},60000);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')resume().catch(()=>location.replace('login.html'))})}
+})();

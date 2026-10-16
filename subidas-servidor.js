@@ -1,4 +1,5 @@
 (() => {
+ if(window.impulsoAuth?.configured)return;
  let key=sessionStorage.getItem('impulso-admin-session')||'';
  window.impulsoServidorConectado=()=>!!key;
  async function request(route,options={}){const r=await fetch('/api/portal'+route,{...options,headers:{Authorization:'Bearer '+key,...options.headers}});let data;try{data=await r.json();}catch{throw Error('Necesitas abrir el administrador desde el servidor Node por HTTP/HTTPS.');}if(!r.ok)throw Error(data.error||'Operación rechazada.');return data;}

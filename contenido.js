@@ -20,4 +20,4 @@ window.impulsoContentReady=window.impulsoSettingsReady.then(()=>{
  if(Array.isArray(c.posts)){window.IMPULSO_INITIAL_POSTS=c.posts;if(document.getElementById('posts')){initialPosts=c.posts;loadPosts()}}
  return c;
 });
-window.addEventListener('storage',()=>location.reload());
+window.addEventListener('storage',event=>{if(['impulso-settings','impulso-posts'].includes(event.key))window.dispatchEvent(new Event('impulso-content-changed'));});

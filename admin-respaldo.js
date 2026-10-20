@@ -1,4 +1,5 @@
-(() => {
+(async () => {
+ await window.impulsoAdminReady;if(window.impulsoIsAdmin!==true)return;
  const editor=document.getElementById('editor'),tabs=document.querySelector('.admin-tabs');
  if(!editor||!tabs)return;
  const tab=document.createElement('button');tab.type='button';tab.dataset.adminTab='backups';tab.setAttribute('role','tab');tab.setAttribute('aria-selected','false');tab.textContent='Copias y recuperación';tabs.append(tab);

@@ -1,7 +1,7 @@
 (() => {
   const $ = id => document.getElementById(id); let jobId='',poll,preview;
   $('key').value=sessionStorage.getItem('impulso-admin-session')||'';
-  async function api(path,options={}) {const r=await fetch('/api/portal'+path,{...options,headers:{Authorization:'Bearer '+$('key').value,...options.headers}}); let data; try {data=await r.json();} catch {throw Error('Esta función requiere el servidor Node. GitHub Pages no ejecuta la API.');} if(!r.ok) throw Error(data.error || 'Operación rechazada.'); return data;}
+  async function api(path,options={}) {if(window.impulsoPortalAPI)return window.impulsoPortalAPI(path,options);const r=await fetch('/api/portal'+path,{...options,headers:{Authorization:'Bearer '+$('key').value,...options.headers}}); let data; try {data=await r.json();} catch {throw Error('Esta función requiere el servidor Node. GitHub Pages no ejecuta la API.');} if(!r.ok) throw Error(data.error || 'Operación rechazada.'); return data;}
   const report=e => {$('status').textContent=e.message || e;};
   const json=data=>({headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   function settingsData(){const form=$('chat-settings'),data=Object.fromEntries(new FormData(form));for(const key of ['enabled','humanEnabled','suggestions'])data[key]=form.elements[key].checked;return data;}

@@ -1,9 +1,9 @@
 // Información pública del sitio. También puedes editarla desde el administrador
 // y descargar un nuevo datos.js para subirlo a GitHub.
 window.IMPULSO_DATOS = {
-  whatsapp: '',
+  whatsapp: '593979103170',
   whatsappMessage: 'Hola, estás contactando con Impulso Universitario. ¿En qué podemos ayudarte?',
-  email: '',
+  email: 'somostic048@gmail.com',
   facebook: '',
   instagram: '',
   tiktok: '',

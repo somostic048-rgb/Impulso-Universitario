@@ -1,534 +1,78 @@
-
-(() => {
-  'use strict';
-
-  const $ = id => document.getElementById(id);
-  const key = 'impulso-manual-v1';
-
-  let state = {
-    name: 'Mi lista',
-    message: '',
-    contacts: [],
-    index: 0
-  };
-
-  let imageURL;
-
-  // NORMALIZAR NÚMEROS TELEFÓNICOS
-  const normalize = raw => {
-    let n = String(raw ?? '').trim().replace(/[^\d+]/g, '');
-
-    if (n.startsWith('00')) {
-      n = '+' + n.slice(2);
-    }
-
-    if (n.startsWith('+')) {
-      n = n.slice(1);
-    } else if (n.startsWith('0')) {
-      n = $('country').value.replace(/\D/g, '') + n.slice(1);
-    } else if (n.length === 9) {
-      n = $('country').value.replace(/\D/g, '') + n;
-    }
-
-    return /^\d{10,15}$/.test(n) ? n : null;
-  };
-
-  // GUARDAR DATOS
-  function save() {
-    try {
-      localStorage.setItem(key, JSON.stringify(state));
-      return true;
-    } catch {
-      $('status').textContent =
-        'No se pudo guardar el avance. Descarga un respaldo antes de cerrar.';
-      return false;
-    }
-  }
-
-  // VALIDAR LISTAS
-  function valid(s) {
-    return s &&
-      typeof s.name === 'string' &&
-      typeof s.message === 'string' &&
-      Array.isArray(s.contacts) &&
-      s.contacts.length <= 10000 &&
-      s.contacts.every(c =>
-        /^\d{10,15}$/.test(c.phone) &&
-        ['pendiente', 'abierto', 'enviado', 'omitido']
-          .includes(c.status)
-      ) &&
-      new Set(s.contacts.map(c => c.phone)).size ===
-        s.contacts.length &&
-      Number.isInteger(s.index) &&
-      s.index >= 0 &&
-      (
-        s.index < s.contacts.length ||
-        s.contacts.length === 0
-      );
-  }
-
-  // RESTAURAR DATOS GUARDADOS
-  try {
-    const old = JSON.parse(localStorage.getItem(key));
-    if (valid(old)) state = old;
-  } catch {}
-
-  $('name').value = state.name;
-  $('message').value = state.message;
-
-  // MOSTRAR CONTACTOS Y PROGRESO
-  function render() {
-    const c = state.contacts[state.index];
-
-    const done = state.contacts.filter(
-      c => c.status === 'enviado'
-    ).length;
-
-    const skipped = state.contacts.filter(
-      c => c.status === 'omitido'
-    ).length;
-
-    $('current').textContent = c
-      ? `Contacto ${state.index + 1} de ${state.contacts.length}: +${c.phone} · ${c.status}`
-      : 'Carga una lista para comenzar.';
-
-    $('summary').textContent =
-      `${done} enviados · ${skipped} omitidos · ` +
-      `${state.contacts.length - done - skipped} por resolver · ` +
-      `Total: ${state.contacts.length}`;
-
-    $('bar').max = state.contacts.length || 1;
-    $('bar').value = done + skipped;
-
-    for (const id of ['open', 'sent', 'skip']) {
-      $(id).disabled = !c || !$('consent').checked;
-    }
-
-    $('rows').replaceChildren();
-
-    state.contacts.forEach((c, i) => {
-      const row = document.createElement('tr');
-
-      if (i === state.index) {
-        row.className = 'active';
-      }
-
-      for (const value of [
-        String(i + 1),
-        '+' + c.phone,
-        c.status
-      ]) {
-        const td = document.createElement('td');
-        td.textContent = value;
-        row.append(td);
-      }
-
-      const td = document.createElement('td');
-
-      const actions = [
-        [
-          'Seleccionar',
-          () => {
-            state.index = i;
-            save();
-            render();
-          }
-        ],
-        [
-          'Volver a pendiente',
-          () => {
-            c.status = 'pendiente';
-            save();
-            render();
-          }
-        ]
-      ];
-
-      for (const [label, fn] of actions) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = label;
-        button.onclick = fn;
-        td.append(button);
-      }
-
-      row.append(td);
-      $('rows').append(row);
-    });
-  }
-
-  // PASAR AL SIGUIENTE CONTACTO
-  function next() {
-    const n = state.contacts.length;
-
-    for (let k = 1; k <= n; k++) {
-      const i = (state.index + k) % n;
-
-      if (
-        ['pendiente', 'abierto'].includes(
-          state.contacts[i].status
-        )
-      ) {
-        state.index = i;
-        return;
-      }
-    }
-
-    $('status').textContent =
-      'Lista terminada: todos los contactos están enviados u omitidos.';
-  }
-
-  // IMPORTAR CONTACTOS DESDE EXCEL
-  $('load').onclick = async () => {
-    try {
-      let cells = [];
-      const f = $('file').files[0];
-
-      if (f) {
-        if (f.size > 10 * 1024 * 1024) {
-          throw Error('Máximo 10 MB.');
-        }
-
-        const book = XLSX.read(
-          await f.arrayBuffer(),
-          { type: 'array' }
-        );
-
-        for (const name of book.SheetNames) {
-          const data = XLSX.utils.sheet_to_json(
-            book.Sheets[name],
-            {
-              header: 1,
-              raw: false
-            }
-          );
-
-          cells.push(...data.flat());
-        }
-      }
-
-      cells.push(
-        ...$('paste').value.split(/[\n;,\t]/)
-      );
-
-      const numbers = [
-        ...new Set(
-          cells.map(normalize).filter(Boolean)
-        )
-      ];
-
-      if (!numbers.length) {
-        throw Error('No se encontraron teléfonos válidos.');
-      }
-
-      if (numbers.length > 10000) {
-        throw Error('Máximo 10.000 contactos.');
-      }
-
-      if (
-        state.contacts.length &&
-        !confirm(
-          'Se reemplazará la lista y su avance. ' +
-          'Descarga un respaldo si necesitas conservarla. ' +
-          '¿Continuar?'
-        )
-      ) {
-        return;
-      }
-
-      state = {
-        name:
-          $('name').value.trim() ||
-          f?.name ||
-          'Mi lista',
-
-        message: $('message').value,
-
-        contacts: numbers.map(phone => ({
-          phone,
-          status: 'pendiente'
-        })),
-
-        index: 0
-      };
-
-      save();
-      render();
-
-      $('status').textContent =
-        `${numbers.length} teléfonos únicos cargados. ` +
-        'Revisa los números antes de enviar.';
-
-    } catch (e) {
-      $('status').textContent = e.message;
-    }
-  };
-
-  // ABRIR WHATSAPP WEB CON EMOJIS
-  $('open').onclick = () => {
-    const c = state.contacts[state.index];
-
-    if (!c || !$('consent').checked) {
-      return;
-    }
-
-    if (
-      c.status === 'enviado' &&
-      !confirm(
-        'Este contacto ya está marcado como enviado. ' +
-        '¿Abrir de nuevo?'
-      )
-    ) {
-      return;
-    }
-
-    // DETECTAR EMOJIS DAÑADOS
-    if (state.message.includes('\uFFFD')) {
-      $('status').textContent =
-        'El mensaje contiene símbolos dañados. ' +
-        'Borra el mensaje anterior y pega nuevamente ' +
-        'el texto con los emojis originales.';
-
-      alert(
-        'El mensaje contiene símbolos dañados (�). ' +
-        'Corrígelo antes de abrir WhatsApp.'
-      );
-
-      $('message').focus();
-      return;
-    }
-
-    if (!state.message.trim()) {
-      alert('Primero escribe el mensaje.');
-      $('message').focus();
-      return;
-    }
-
-    // ENLACE DIRECTO A WHATSAPP WEB
-    // CONSERVA EMOJIS, TILDES Y SALTOS DE LÍNEA
-    let url;
-
-    try {
-      url =
-        'https://web.whatsapp.com/send?phone=' +
-        encodeURIComponent(c.phone) +
-        '&text=' +
-        encodeURIComponent(state.message);
-    } catch {
-      $('status').textContent =
-        'El mensaje contiene caracteres inválidos. ' +
-        'Vuelve a copiar el texto original.';
-      return;
-    }
-
-    window.open(
-      url,
-      '_blank',
-      'noopener,noreferrer'
-    );
-
-    if (c.status === 'pendiente') {
-      c.status = 'abierto';
-    }
-
-    save();
-    render();
-
-    $('status').textContent =
-      'Se intentó abrir WhatsApp Web. ' +
-      'Verifica el mensaje y pulsa Enviar en WhatsApp. ' +
-      'Después regresa para marcarlo como enviado. ' +
-      'Si no se abrió, revisa el bloqueo de ventanas.';
-  };
-
-  // MARCAR CONTACTO COMO ENVIADO
-  $('sent').onclick = () => {
-    const c = state.contacts[state.index];
-
-    if (!c || !$('consent').checked) {
-      return;
-    }
-
-    if (
-      !confirm(
-        '¿Confirmas que ya pulsaste Enviar ' +
-        'en WhatsApp para +' + c.phone + '?'
-      )
-    ) {
-      return;
-    }
-
-    c.status = 'enviado';
-    c.markedAt = new Date().toISOString();
-
-    next();
-    save();
-    render();
-  };
-
-  // OMITIR CONTACTO
-  $('skip').onclick = () => {
-    const c = state.contacts[state.index];
-
-    if (!c || !$('consent').checked) {
-      return;
-    }
-
-    c.status = 'omitido';
-
-    next();
-    save();
-    render();
-  };
-
-  // CONTROLAR AUTORIZACIÓN
-  $('consent').onchange = render;
-
-  // GUARDAR NOMBRE Y MENSAJE
-  for (const id of ['name', 'message']) {
-    $(id).oninput = () => {
-      state[id] = $(id).value;
-      save();
-    };
-  }
-
-  // COPIAR MENSAJE SIN ALTERAR EMOJIS
-  $('copy').onclick = async () => {
-    if (state.message.includes('\uFFFD')) {
-      $('status').textContent =
-        'El mensaje tiene símbolos dañados. ' +
-        'Corrígelo antes de copiar.';
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(
-        state.message
-      );
-
-      $('status').textContent =
-        'Mensaje copiado correctamente.';
-
-    } catch {
-      $('message').focus();
-      $('message').select();
-
-      $('status').textContent =
-        'Selecciona el texto y usa Ctrl+C.';
-    }
-  };
-
-  // VISTA PREVIA DE IMAGEN
-  $('image').onchange = () => {
-    if (imageURL) {
-      URL.revokeObjectURL(imageURL);
-    }
-
-    const f = $('image').files[0];
-
-    $('preview').hidden = !f;
-
-    if (f) {
-      imageURL = URL.createObjectURL(f);
-      $('preview').src = imageURL;
-    }
-  };
-
-  // EXPORTAR RESPALDO
-  $('export').onclick = () => {
-    const blob = new Blob(
-      [JSON.stringify(state, null, 2)],
-      {
-        type: 'application/json'
-      }
-    );
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-
-    a.href = url;
-    a.download = 'respaldo-envio-manual.json';
-
-    a.click();
-
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-    }, 1000);
-  };
-
-  // RESTAURAR RESPALDO
-  $('restore').onchange = async () => {
-    try {
-      const f = $('restore').files[0];
-
-      if (!f) {
-        return;
-      }
-
-      if (f.size > 5 * 1024 * 1024) {
-        throw Error('Respaldo demasiado grande.');
-      }
-
-      const s = JSON.parse(await f.text());
-
-      if (!valid(s)) {
-        throw Error('Respaldo no válido.');
-      }
-
-      if (
-        state.contacts.length &&
-        !confirm(
-          '¿Reemplazar la lista y avance actuales ' +
-          'con el respaldo?'
-        )
-      ) {
-        return;
-      }
-
-      state = s;
-
-      $('name').value = s.name;
-      $('message').value = s.message;
-
-      save();
-      render();
-
-    } catch (e) {
-      $('status').textContent = e.message;
-
-    } finally {
-      $('restore').value = '';
-    }
-  };
-
-  // BORRAR LISTA
-  $('clear').onclick = () => {
-    if (
-      !confirm(
-        '¿Borrar esta lista y su avance de este navegador?'
-      )
-    ) {
-      return;
-    }
-
-    state = {
-      name: 'Mi lista',
-      message: '',
-      contacts: [],
-      index: 0
-    };
-
-    localStorage.removeItem(key);
-
-    $('name').value = state.name;
-    $('message').value = '';
-    $('file').value = '';
-    $('paste').value = '';
-
-    render();
-  };
-
-  // INICIAR PLATAFORMA
-  render();
-
+(() => {'use strict';
+const $=id=>document.getElementById(id),auth=window.impulsoAuth;
+let user,device,localKey,uiKey,blockKey,personal,ui={mode:'team',listId:null,currentId:null},list=null,contacts=[],busy=false,timer,previewURL,teamPaused=false;
+const empty=()=>({name:'Mi lista',message:'',contacts:[],index:0});
+const storageRead=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}};
+const tell=text=>{$('status').textContent=text;};
+function write(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch{throw Error('No se pudo guardar en este navegador. Descarga un respaldo antes de cerrar.');}}
+function validPersonal(s){return s&&typeof s.name==='string'&&s.name.length<=120&&typeof s.message==='string'&&s.message.length<=4096&&Array.isArray(s.contacts)&&s.contacts.length<=2000&&s.contacts.every(c=>c&&/^[1-9]\d{9,14}$/.test(c.phone)&&['pendiente','abierto','enviado','omitido','bloqueado'].includes(c.status))&&new Set(s.contacts.map(c=>c.phone)).size===s.contacts.length&&Number.isInteger(s.index)&&s.index>=0&&(s.index<s.contacts.length||!s.contacts.length);}
+function normalize(value){let n=String(value??'').trim();if(!/^[+\d() .-]+$/.test(n))return null;n=n.replace(/[^\d+]/g,'');if(n.startsWith('00'))n='+'+n.slice(2);if(n.startsWith('+'))n=n.slice(1);else if(n.startsWith('0'))n=$('country').value.replace(/\D/g,'')+n.slice(1);else if(n.length===9)n=$('country').value.replace(/\D/g,'')+n;return /^[1-9]\d{9,14}$/.test(n)?n:null;}
+const label=c=>'Contacto IU '+c.phone;
+const team=()=>ui.mode==='team';
+const current=()=>team()?contacts.find(c=>c.id===ui.currentId):personal.contacts[personal.index];
+const stateLabel={pending:'pendiente',reserved:'reservado',opened:'chat preparado',sent:'enviado (manual)',skipped:'omitido',blocked:'no contactar'};
+const mine=c=>c&&c.reserved_by===user.id&&c.device_id===device&&['reserved','opened'].includes(c.state);
+function persist(){write(uiKey,ui);if(!team())write(localKey,personal);}
+function closeLink(){$('open').hidden=true;$('open').removeAttribute('href');}
+async function api(path,options={}){const s=await auth.restore();if(!s)throw Error('La sesión venció. Vuelve a ingresar desde el panel.');return auth.request('/rest/v1/'+path,{...options,access:s.access_token});}
+const rpc=(name,body)=>api('rpc/'+name,{method:'POST',body});
+async function run(fn){if(busy)return false;busy=true;render();try{await fn();return true;}catch(e){closeLink();const missing=e.status===404||e.code==='PGRST202'||e.code==='PGRST205';tell(missing?'Falta instalar equipo-whatsapp.sql en Supabase. Usa la lista personal mientras se configura el equipo.':e.message);return false;}finally{busy=false;render();}}
+function displayState(c){return team()?stateLabel[c.state]||c.state:c.status;}
+function fillFields(){$('name').value=team()?(list?.name||'Nueva lista compartida'):personal.name;$('message').value=team()?(list?.message||''):personal.message;$('message').disabled=team()&&!!list;$('consent-note').value=team()?(list?.consent_note||''):'';}
+function render(){if(!user)return;const c=current(),data=team()?contacts:personal.contacts;const sent=data.filter(c=>team()?c.state==='sent':c.status==='enviado').length,skipped=data.filter(c=>team()?['skipped','blocked'].includes(c.state):['omitido','bloqueado'].includes(c.status)).length;
+ $('team-controls').hidden=!team();$('mode-info').textContent=team()?'Modo compartido: la reserva se guarda en Supabase antes de preparar el chat. No se usa la API de WhatsApp.':'Modo personal: solo tu cuenta y navegador conservan esta lista; no coordina contactos con los otros equipos.';
+ $('take').hidden=!team();$('release').hidden=!team();$('pause').disabled=busy||!list;$('pause').textContent=list?.paused?'Reanudar lista para todos':'Pausar lista para todos';$('pause-all').disabled=busy;$('pause-all').textContent=teamPaused?'Reanudar equipo completo':'Pausar todo el equipo';
+ $('current').textContent=c?`${label(c)} · +${c.phone} · ${displayState(c)}`:'No hay contacto seleccionado. '+(team()?'Pulsa Tomar siguiente contacto disponible.':'Carga tu lista.');
+ const usable=!!c&&(!team()?['pendiente','abierto'].includes(c.status):mine(c)&&!list?.paused&&!teamPaused);
+ for(const id of ['prepare','sent','skip'])$(id).disabled=busy||!usable||!$('consent').checked;
+ $('release').disabled=busy||!mine(c);$('take').disabled=busy||!list||list.paused||teamPaused||!$('consent').checked;
+ for(const id of ['load','join','refresh','block','restore','mode'])$(id).disabled=busy;
+ for(const id of ['name','file','paste','country','consent-note'])$(id).disabled=busy;
+ $('message').disabled=busy||(team()&&!!list);$('new-list').disabled=busy;
+ $('sent').disabled=$('sent').disabled||!(team()?c?.state==='opened':c?.status==='abierto');
+ $('summary').textContent=`${sent} enviados · ${skipped} omitidos o no contactar · ${data.length-sent-skipped} por resolver · Total ${data.length}`;
+ $('bar').max=data.length||1;$('bar').value=sent+skipped;$('rows').replaceChildren();
+ data.forEach((row,i)=>{const tr=document.createElement('tr');if(c===row)tr.className='active';for(const text of [String(i+1),label(row),'+'+row.phone,displayState(row)+(team()&&['reserved','opened'].includes(row.state)?mine(row)?' · mío':' · otra sesión':'' )]){const td=document.createElement('td');td.textContent=text;tr.append(td);}const cell=document.createElement('td');
+ if(!team()){const b=document.createElement('button');b.textContent='Seleccionar';b.disabled=busy||['enviado','bloqueado'].includes(row.status);b.onclick=()=>{personal.index=i;closeLink();persist();render();};cell.append(b);}else if(mine(row)){const b=document.createElement('button');b.textContent='Retomar mi contacto';b.disabled=busy;b.onclick=()=>{ui.currentId=row.id;closeLink();persist();render();};cell.append(b);}
+ else if(['reserved','opened'].includes(row.state)&&row.reserved_by===user.id){const b=document.createElement('button');b.textContent='Liberar mi sesión anterior';b.disabled=busy;b.onclick=()=>run(async()=>{if(!confirm('Confirma que no estás enviando a este número desde tu otro dispositivo. ¿Liberar la reserva?'))return;await rpc('iu_manual_release',{p_id:row.id});await refreshContacts();});cell.append(b);}else cell.textContent=team()&&['reserved','opened'].includes(row.state)?'Reservado: no disponible':'—';tr.append(cell);$('rows').append(tr);});
+ if(!usable||!$('consent').checked||busy)closeLink();
+}
+async function refreshControl(){const rows=await api('iu_manual_control?select=paused');teamPaused=rows[0]?.paused===true;}
+async function refreshLists(){await refreshControl();const rows=await api('iu_manual_lists?select=*&order=created_at.desc&limit=100');$('lists').replaceChildren(new Option('Selecciona una lista',''));for(const row of rows)$('lists').add(new Option(row.name+(row.paused?' · pausada':''),row.id));$('lists').value=ui.listId||'';return rows;}
+async function refreshContacts(){if(!team()||!ui.listId)return;await refreshControl();const lists=await api('iu_manual_lists?id=eq.'+encodeURIComponent(ui.listId)+'&select=*');list=lists[0]||null;if(!list)throw Error('Lista no disponible');const rows=[];for(let offset=0;offset<2000;offset+=500){const page=await api('iu_manual_contacts?list_id=eq.'+encodeURIComponent(ui.listId)+'&select=*&order=position&limit=500&offset='+offset);rows.push(...page);if(page.length<500)break;}contacts=rows;if(ui.currentId&&!contacts.some(c=>c.id===ui.currentId&&mine(c)))ui.currentId=null;persist();render();}
+function localNext(){for(let k=1;k<=personal.contacts.length;k++){const i=(personal.index+k)%personal.contacts.length;if(['pendiente','abierto'].includes(personal.contacts[i].status)){personal.index=i;return;}}tell('Lista terminada. No hay contactos personales pendientes.');}
+async function take(){closeLink();const row=await rpc('iu_manual_claim',{p_list:ui.listId,p_device:device});ui.currentId=row?.id||null;await refreshContacts();tell(row?'Contacto reservado para esta sesión. Pulsa Preparar chat.':'No hay contactos disponibles. Pueden estar terminados, excluidos o reservados por compañeros.');}
+$('mode').onchange=()=>run(async()=>{ui.mode=$('mode').value;list=null;contacts=[];closeLink();persist();if(team()){const lists=await refreshLists();list=lists.find(l=>l.id===ui.listId)||null;if(list)await refreshContacts();}fillFields();});
+$('refresh').onclick=()=>run(async()=>{await refreshLists();if(ui.listId)await refreshContacts();tell('Listas actualizadas.');});
+$('join').onclick=()=>run(async()=>{if(!$('lists').value)throw Error('Selecciona una lista compartida');ui.listId=$('lists').value;ui.currentId=null;closeLink();await refreshContacts();fillFields();tell('Lista abierta. Cada compañero debe tomar su siguiente contacto.');});
+$('new-list').onclick=()=>run(async()=>{ui.listId=null;ui.currentId=null;list=null;contacts=[];persist();fillFields();closeLink();tell('Prepara una lista nueva. Las reservas de las otras listas se conservan: retómalas o libéralas explícitamente antes de abandonarlas.');});
+$('pause').onclick=()=>run(async()=>{if(!list)return;await rpc('iu_manual_pause',{p_list:list.id,p_paused:!list.paused});closeLink();await refreshContacts();tell(list.paused?'Lista pausada para todos. Si hubo una restricción de WhatsApp, resuélvela antes de reanudar.':'Lista reanudada. Esto no elimina restricciones de WhatsApp.');});
+$('pause-all').onclick=()=>run(async()=>{if(!confirm(teamPaused?'¿La restricción ya fue resuelta y el equipo puede volver a contactar a personas autorizadas?':'¿Pausar el trabajo de todas las listas compartidas? Avise a los compañeros que cierren los chats ya abiertos.'))return;await rpc('iu_manual_pause_all',{p_paused:!teamPaused});await refreshControl();if(list)await refreshContacts();closeLink();tell(teamPaused?'Equipo pausado. No envíen desde chats que ya estaban abiertos.':'Equipo reanudado. No elimina las restricciones de WhatsApp.');});
+$('load').onclick=()=>run(async()=>{if(!$('consent').checked)throw Error('Confirma la autorización real de los contactos antes de cargarlos.');const note=$('consent-note').value.trim();if(note.length<3)throw Error('Indica el origen de la autorización.');let values=[];const f=$('file').files[0];if(f){if(f.size>10*1024*1024)throw Error('Archivo demasiado grande (máximo 10 MB).');const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});for(const name of wb.SheetNames)values.push(...XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:false}).flat());}values.push(...$('paste').value.split(/[\n;,\t]/));const numbers=[...new Set(values.map(normalize).filter(Boolean))];if(!numbers.length||numbers.length>2000)throw Error('La lista debe contener entre 1 y 2000 teléfonos válidos.');const name=$('name').value.trim()||'Mi lista';
+ if(team()){const result=await rpc('iu_manual_create',{p_name:name,p_message:$('message').value,p_consent_note:note,p_phones:numbers});if(!result.id){tell('No se creó una lista: todos los números ya estaban en otras listas activas o excluidos.');return;}ui.listId=result.id;ui.currentId=null;await refreshLists();await refreshContacts();fillFields();tell(`Lista compartida: ${result.added} nuevos; ${result.ignored} duplicados o excluidos.`);}
+ else{if(personal.contacts.length&&!confirm('¿Reemplazar tu lista personal? Descarga antes el respaldo si necesitas conservarla.'))return;const exclusions=storageRead(blockKey,[]);const accepted=numbers.filter(n=>!exclusions.includes(n));personal={name,message:$('message').value,consent_note:note,contacts:accepted.map(phone=>({phone,status:'pendiente'})),index:0};persist();tell(`${accepted.length} contactos personales cargados; ${numbers.length-accepted.length} excluidos. No se coordinan con otros usuarios en este modo.`);}
+ closeLink();});
+$('take').onclick=()=>run(take);
+$('prepare').onclick=()=>run(async()=>{const c=current();if(!c||!$('consent').checked)throw Error('Selecciona un contacto autorizado.');if(team()){if(!mine(c)||list.paused)throw Error('El contacto no está disponible para esta sesión.');await rpc('iu_manual_mark',{p_id:c.id,p_device:device,p_action:'opened'});await refreshContacts();}else{if(!['pendiente','abierto'].includes(c.status))throw Error('Contacto ya terminado o excluido');c.status='abierto';persist();}tell('Chat preparado. Ahora pulsa Abrir WhatsApp; allí debes adjuntar la imagen y pulsar Enviar.');});
+// Enlace nativo: evita window.open() después de una espera, que los móviles suelen bloquear.
+function readyLink(){const c=current();if(!c||!$('consent').checked||!(team()?mine(c)&&c.state==='opened'&&!list.paused&&!teamPaused:c.status==='abierto'))return;const a=$('open');a.href='https://wa.me/'+c.phone+'?text='+encodeURIComponent(team()?list.message:personal.message);a.target=$('open-mode').value==='new'?'_blank':'_top';a.rel='noopener noreferrer';a.hidden=false;}
+const oldPrepare=$('prepare').onclick;$('prepare').onclick=async()=>{const ok=await oldPrepare();if(ok&&!busy)readyLink();};
+$('open-mode').onchange=()=>{closeLink();readyLink();};
+$('open').onclick=e=>{if(!$('consent').checked){e.preventDefault();closeLink();return;}tell('Se abre WhatsApp. Volver a esta página no marca el envío automáticamente.');};
+$('consent').onchange=()=>{closeLink();render();};
+async function finish(action){const c=current();if(!c||!$('consent').checked)throw Error('Selecciona un contacto autorizado');if(action==='sent'&&!confirm('¿Confirmas que pulsaste ENVIAR en WhatsApp para +'+c.phone+'? No basta con abrir el chat.'))return;closeLink();if(team()){await rpc('iu_manual_mark',{p_id:c.id,p_device:device,p_action:action});await take();}else{if(!['pendiente','abierto'].includes(c.status))throw Error('Contacto ya terminado');if(action==='sent'&&c.status!=='abierto')throw Error('Primero prepara el chat');c.status=action==='sent'?'enviado':'omitido';c.markedAt=new Date().toISOString();if(action==='sent'){const excluded=storageRead(blockKey,[]);write(blockKey,[...new Set([...excluded,c.phone])]);}localNext();persist();}}
+$('sent').onclick=()=>run(()=>finish('sent'));$('skip').onclick=()=>run(()=>finish('skipped'));
+$('release').onclick=()=>run(async()=>{const c=current();if(!mine(c))return;if(!confirm('¿Confirmas que no enviaste y que cerrarás el chat anterior? El contacto quedará disponible para otra persona.'))return;await rpc('iu_manual_mark',{p_id:c.id,p_device:device,p_action:'release'});ui.currentId=null;closeLink();await refreshContacts();tell('Reserva liberada. No uses el chat anterior para enviar.');});
+for(const id of ['name','message'])$(id).oninput=()=>{if(!team()){personal[id]=$(id).value;persist();closeLink();}};
+$('copy').onclick=async()=>{try{await navigator.clipboard.writeText(team()?list?.message||'':personal.message);tell('Mensaje copiado.');}catch{$('message').focus();$('message').select();tell('Copia el mensaje seleccionado.');}};
+$('image').onchange=()=>{if(previewURL)URL.revokeObjectURL(previewURL);const f=$('image').files[0];$('preview').hidden=!f;if(f){previewURL=URL.createObjectURL(f);$('preview').src=previewURL;}};
+function download(name,data,type){const url=URL.createObjectURL(new Blob([data],{type})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+$('vcf').onclick=()=>{const rows=team()?contacts:personal.contacts,blocked=storageRead(blockKey,[]);const allowed=rows.filter(c=>team()?c.state!=='blocked':c.status!=='bloqueado'&&!blocked.includes(c.phone));if(!allowed.length){tell('No hay contactos disponibles para exportar.');return;}download('contactos-impulso.vcf',allowed.map(c=>`BEGIN:VCARD\r\nVERSION:3.0\r\nFN:${label(c)}\r\nN:;${label(c)};;;\r\nTEL;TYPE=CELL:+${c.phone}\r\nEND:VCARD`).join('\r\n')+'\r\n','text/vcard;charset=utf-8');tell('Importa el archivo VCF en Contactos del teléfono. No crea cuentas de acceso ni evita el spam.');};
+$('export').onclick=()=>download('respaldo-contactos.json',JSON.stringify(team()?{mode:'team-snapshot',list,contacts}:personal,null,2),'application/json');
+$('restore').onchange=()=>run(async()=>{try{if(team())throw Error('El respaldo JSON se restaura solo en modo personal. El equipo conserva su avance en Supabase.');const f=$('restore').files[0];if(!f)return;if(f.size>5*1024*1024)throw Error('Archivo demasiado grande');const s=JSON.parse(await f.text());if(!validPersonal(s))throw Error('Respaldo personal inválido');if(!confirm('¿Reemplazar tu lista personal con este respaldo?'))return;const excluded=storageRead(blockKey,[]);for(const c of s.contacts)if(excluded.includes(c.phone)&&c.status!=='enviado')c.status='bloqueado';personal=s;persist();fillFields();closeLink();tell('Lista personal restaurada.');}finally{$('restore').value='';}});
+$('clear').onclick=()=>run(async()=>{if(team())throw Error('Esta acción solo borra tu lista personal, no la compartida.');if(!confirm('¿Borrar tu lista personal? Se conservarán las exclusiones.'))return;personal=empty();persist();fillFields();closeLink();});
+$('block').onclick=()=>run(async()=>{const n=normalize($('block-phone').value);if(!n)throw Error('Escribe un teléfono completo válido');if(!confirm('¿Añadir +'+n+' a No contactar?'))return;if(team()){await rpc('iu_manual_block',{p_phone:n});await refreshContacts();}else{write(blockKey,[...new Set([...storageRead(blockKey,[]),n])]);for(const c of personal.contacts)if(c.phone===n)c.status='bloqueado';persist();}closeLink();tell('Número excluido. La baja no puede retirarse desde este panel.');});
+$('legacy').onclick=()=>run(async()=>{if(team())throw Error('Cambia al modo personal');const old=storageRead('impulso-manual-v1',null);if(!validPersonal(old))throw Error('No hay una lista anterior válida');if(!confirm('Esta lista antigua pertenecía a este navegador. ¿Confirmas que es tuya y quieres recuperarla?'))return;personal=old;persist();fillFields();closeLink();tell('Lista anterior recuperada para tu cuenta.');});
+async function init(){try{if(!auth?.configured)throw Error('Falta configurar Supabase para verificar tu acceso.');const session=await auth.restore();if(!session){tell('Inicia sesión con tu propia cuenta de administrador o editor.');const a=document.createElement('a');a.href='login.html?role=user';a.target='_top';a.textContent=' Ingresar';$('status').append(a);return;}user=await auth.request('/auth/v1/user',{access:session.access_token});localKey='iu-manual-local:'+user.id;uiKey='iu-manual-ui:'+user.id;blockKey='iu-manual-excluded:'+user.id;const raw=storageRead(localKey,empty());personal=validPersonal(raw)?raw:empty();const restoredUI=storageRead(uiKey,{});ui={mode:restoredUI.mode==='local'?'local':'team',listId:/^[0-9a-f-]{36}$/i.test(restoredUI.listId||'')?restoredUI.listId:null,currentId:restoredUI.currentId||null};const deviceKey='iu-manual-device:'+user.id;device=sessionStorage.getItem(deviceKey)||crypto.randomUUID();sessionStorage.setItem(deviceKey,device);$('identity').textContent='Sesión: '+user.email+' · acceso de administrador o editor. Tu sesión no desconecta las cuentas de tus compañeros.';$('workspace').hidden=false;$('mode').value=ui.mode;$('legacy').hidden=!validPersonal(storageRead('impulso-manual-v1',null));fillFields();render();if(team())await run(async()=>{const lists=await refreshLists();list=lists.find(l=>l.id===ui.listId)||null;if(list)await refreshContacts();fillFields();});timer=setInterval(()=>{if(team()&&ui.listId&&!busy&&!document.hidden)run(refreshContacts);},15000);}catch(e){tell(e.message);}}
+window.addEventListener('pagehide',()=>{if(previewURL)URL.revokeObjectURL(previewURL);});document.addEventListener('visibilitychange',()=>{if(!document.hidden&&team()&&ui.listId&&!busy){closeLink();run(refreshContacts);}});window.addEventListener('storage',e=>{if(e.key===localKey&&!team()){const raw=storageRead(localKey,personal);if(validPersonal(raw)){personal=raw;closeLink();render();tell('Avance actualizado desde otra pestaña de tu cuenta.');}}});init();
 })();

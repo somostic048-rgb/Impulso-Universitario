@@ -3,3 +3,5 @@
 @media(max-width:600px){#contact-table{max-height:320px}#contact-table thead{display:none}#contact-table tbody{display:block}#contact-table tr{display:grid;grid-template-columns:28px minmax(0,1fr);gap:2px 8px;border-bottom:1px solid #dce5f0;padding:12px 8px}#contact-table td{border:0;padding:3px;font-size:14px;overflow-wrap:anywhere}#contact-table td:first-child{grid-column:1;grid-row:1 / span 3;color:#59718c}#contact-table td:nth-child(2){grid-column:2;font-weight:700;font-size:16px}#contact-table td:nth-child(3),#contact-table td:nth-child(4){grid-column:2}#contact-table td:nth-child(4):has(button){padding-top:7px}#contact-table td:last-child:not(:has(button)){display:none}}
 
 #load-status:not(:empty){padding:14px;border-radius:10px;background:#eaf3ff;font-weight:600}#load-status.error{background:#fff0ed;color:#8b2420;border:1px solid #e7b1a8}.required-hint{display:inline-block;font-size:12px;color:#8b2420;margin-left:6px}.field-help{font-size:14px;color:#566b81}
+
+td .whatsapp{font-size:14px;min-width:155px}#open{outline:2px solid #0b6839;outline-offset:2px}#wa-client{max-width:480px}
